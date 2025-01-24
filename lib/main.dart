@@ -5,7 +5,6 @@ import 'package:flutter/gestures.dart';
 
 WebClient client = WebClient();
 List<Token> tokenList = [];
-
 void main() {
   client.getRating(0, 100)
     .then((value) {tokenList = value;});
