@@ -28,29 +28,48 @@ class HomeScreen extends StatefulWidget {
 
 class HomeScreenState extends State<HomeScreen> {
   List<Token> tokenList = [];
+  int _start = 0;
+  final limit = 20;
   update() {
-    print("Updated");
     setState(() {});
+  }
+
+  void getRating() async {
+    WebClient().getRating(_start, limit).then((value) {
+      tokenList = value;
+      update();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     if (tokenList.isEmpty) {
-      WebClient().getRating().then((value) {
-        tokenList = value;
-        update();
-      });
+      getRating();
     }
 
     return Scaffold(
         appBar: AppBar(
-            title: Text("Tikers rating", style: TextStyle(fontSize: 22))),
+          title: Row(children: [
+            Text("Token rating", style: TextStyle(fontSize: 22)),
+            ElevatedButton(
+                child: Text("Prev Page", style: TextStyle(fontSize: 22)),
+                onPressed: () {
+                  if (_start >= limit) {
+                    _start -= limit;
+                    getRating();
+                  }
+                }),
+            ElevatedButton(
+                child: Text("Next Page", style: TextStyle(fontSize: 22)),
+                onPressed: () {
+                  _start += limit;
+                  getRating();
+                }),
+          ]),
+        ),
         body: RefreshIndicator(
             onRefresh: () async {
-              WebClient().getRating().then((value) {
-                tokenList = value;
-                update();
-              });
+              getRating();
             },
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -107,9 +126,9 @@ class Token {
   final double market_cap_usd;
   final double volume24;
   final double volume24a;
-  final double csupply;
-  final double tsupply;
-  final double? msupply;
+  final dynamic csupply;
+  final dynamic tsupply;
+  final dynamic msupply;
   Token(
       {required this.id,
       required this.symbol,
@@ -125,26 +144,25 @@ class Token {
       required this.volume24a,
       required this.csupply,
       required this.tsupply,
-      this.msupply});
+      required this.msupply});
   factory Token.fromJson(Map<String, dynamic> json) {
     return Token(
-        id: int.parse(json['id']),
-        symbol: json['symbol'],
-        name: json['name'],
-        rank: json['rank'],
-        price_usd: double.parse(json['price_usd']),
-        percent_change_24h: double.parse(json['percent_change_24h']),
-        percent_change_1h: double.parse(json['percent_change_1h']),
-        percent_change_7d: double.parse(json['percent_change_7d']),
-        price_btc: double.parse(json['price_btc']),
-        market_cap_usd: double.parse(json['market_cap_usd']),
-        volume24: json['volume24'],
-        volume24a: json['volume24a'],
-        csupply: double.parse(json['csupply']),
-        tsupply: double.parse(json['tsupply']),
-        msupply: json['msupply'] != "" && json['msupply'] != null
-            ? double.parse(json['msupply'])
-            : null);
+      id: int.parse(json['id']),
+      symbol: json['symbol'],
+      name: json['name'],
+      rank: json['rank'],
+      price_usd: double.parse(json['price_usd']),
+      percent_change_24h: double.parse(json['percent_change_24h']),
+      percent_change_1h: double.parse(json['percent_change_1h']),
+      percent_change_7d: double.parse(json['percent_change_7d']),
+      price_btc: double.parse(json['price_btc']),
+      market_cap_usd: double.tryParse(json['market_cap_usd']) ?? 0,
+      volume24: (json['volume24'] ?? 0).toDouble(),
+      volume24a: (json['volume24a'] ?? 0).toDouble(),
+      csupply: json['csupply'],
+      tsupply: json['tsupply'],
+      msupply: json['msupply'],
+    );
   }
   Map<String, dynamic> toMap() {
     return {
@@ -171,18 +189,14 @@ class WebClient {
   final client = http.Client();
   WebClient();
 
-  Future<List<Token>> getRating() async {
-    var body = json.encode({"limit": "1000"});
-    Map<String, String> headers = {
-      'Content-type': 'application/json',
-      'Accept': 'application/json',
-    };
-
+  Future<List<Token>> getRating(int start, int limit) async {
     try {
       final response = await client.post(
-          Uri.https('api.coinlore.net', '/api/tickers/'),
-          headers: headers,
-          body: body);
+        Uri.https('api.coinlore.net', '/api/tickers/', {
+          'start': start.toString(),
+          'limit': limit.toString(),
+        }),
+      );
       return (parseTokens(response.body));
     } finally {
       client.close();
