@@ -52,7 +52,7 @@ class HomeScreenState extends State<HomeScreen> {
           title: Row(children: [
             Text("Token rating", style: TextStyle(fontSize: 22)),
             ElevatedButton(
-                child: Text("Prev Page", style: TextStyle(fontSize: 22)),
+                child: Text("Prev", style: TextStyle(fontSize: 22)),
                 onPressed: () {
                   if (_start >= limit) {
                     _start -= limit;
@@ -60,7 +60,7 @@ class HomeScreenState extends State<HomeScreen> {
                   }
                 }),
             ElevatedButton(
-                child: Text("Next Page", style: TextStyle(fontSize: 22)),
+                child: Text("Next", style: TextStyle(fontSize: 22)),
                 onPressed: () {
                   _start += limit;
                   getRating();
