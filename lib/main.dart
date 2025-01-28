@@ -1,7 +1,9 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/gestures.dart';
+import 'dart:math';
 
 void main() {
   runApp(const MyApp());
@@ -13,6 +15,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       scrollBehavior: const MaterialScrollBehavior()
           .copyWith(dragDevices: PointerDeviceKind.values.toSet()),
       home: HomeScreen(),
@@ -21,6 +24,7 @@ class MyApp extends StatelessWidget {
 }
 
 class HomeScreen extends StatefulWidget {
+  final limit = 20;
   const HomeScreen({super.key});
   @override
   HomeScreenState createState() => HomeScreenState();
@@ -29,24 +33,32 @@ class HomeScreen extends StatefulWidget {
 class HomeScreenState extends State<HomeScreen> {
   List<Token> tokenList = [];
   int _start = 0;
-  final limit = 20;
-  update() {
-    setState(() {});
+
+  update(int i, List<Token> value) {
+    if (mounted) {
+      setState(() {
+        _start += i * widget.limit;
+        tokenList = value;
+      });
+    }
   }
 
-  void getRating() async {
-    WebClient().getRating(_start, limit).then((value) {
-      tokenList = value;
-      update();
+  @override
+  initState() {
+    super.initState();
+    getRating(0);
+  }
+
+  void getRating(int i) async {
+    WebClient()
+        .getRating(_start + i * widget.limit, widget.limit)
+        .then((value) {
+      update(i, value);
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (tokenList.isEmpty) {
-      getRating();
-    }
-
     return Scaffold(
         appBar: AppBar(
           title: Row(children: [
@@ -54,22 +66,20 @@ class HomeScreenState extends State<HomeScreen> {
             ElevatedButton(
                 child: Text("Prev", style: TextStyle(fontSize: 22)),
                 onPressed: () {
-                  if (_start >= limit) {
-                    _start -= limit;
-                    getRating();
+                  if (_start >= widget.limit) {
+                    getRating(-1);
                   }
                 }),
             ElevatedButton(
                 child: Text("Next", style: TextStyle(fontSize: 22)),
                 onPressed: () {
-                  _start += limit;
-                  getRating();
+                  getRating(1);
                 }),
           ]),
         ),
         body: RefreshIndicator(
             onRefresh: () async {
-              getRating();
+              getRating(0);
             },
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -99,17 +109,66 @@ class TokenScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    dynamic tokenMap = token.toMap();
+    final Random rng = Random();
+    final List<double> rList = [
+      rng.nextDouble() - 0.5,
+      rng.nextDouble() - 0.5,
+      rng.nextDouble() - 0.5,
+      rng.nextDouble() - 0.5,
+      rng.nextDouble() - 0.5,
+    ];
+    final dynamic tokenMap = token.toMap();
+
+    final double price = tokenMap['Price (USD)'];
+    final double p7d = tokenMap['Percent change (7d)'] / 100;
+    final double p24h = tokenMap['Percent change (24h)'] / 100;
+
     return Scaffold(
-      appBar: AppBar(title: Text("Token info", style: TextStyle(fontSize: 22))),
-      body: ListView.builder(
-          padding: const EdgeInsets.all(8),
-          itemCount: tokenMap.length,
-          itemBuilder: (BuildContext context, int index) {
-            return Text(
-                "${tokenMap.keys.toList()[index]}: ${tokenMap.values.toList()[index]}");
-          }),
-    );
+        appBar:
+            AppBar(title: Text("Token info", style: TextStyle(fontSize: 22))),
+        body: RefreshIndicator(
+            onRefresh: () async {},
+            child: Column(
+              children: <Widget>[
+                SizedBox(
+                  width: 400,
+                  height: 320,
+                  child: ListView.builder(
+                      padding: const EdgeInsets.all(8),
+                      itemCount: tokenMap.length,
+                      itemBuilder: (BuildContext context, int index) {
+                        return Text(
+                            "${tokenMap.keys.toList()[index]}: ${tokenMap.values.toList()[index]}");
+                      }),
+                ),
+                Container(
+                  padding: EdgeInsets.fromLTRB(0, 8, 24, 0),
+                  height: 250,
+                  width: 400,
+                  child: LineChart(
+                    LineChartData(
+                      titlesData: tData,
+                      maxY: (price * (1 + max(p24h.abs(), p7d.abs()) + 0.05)),
+                      minY: price * (1 - max(p24h.abs(), p7d.abs()) - 0.05),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: [
+                            FlSpot(1, price / (1 + p7d)),
+                            FlSpot(2, price * (1 + 0.1 * rList[0])),
+                            FlSpot(3, price * (1 + 0.1 * rList[1])),
+                            FlSpot(4, price * (1 + 0.1 * rList[2])),
+                            FlSpot(5, price * (1 + 0.1 * rList[3])),
+                            FlSpot(6, price * (1 + 0.1 * rList[4])),
+                            FlSpot(7, price / (1 + p24h)),
+                            FlSpot(8, price),
+                          ],
+                        )
+                      ],
+                    ),
+                  ),
+                )
+              ],
+            )));
   }
 }
 
@@ -202,10 +261,61 @@ class WebClient {
       client.close();
     }
   }
+
+  Future<Token> getToken(int id) async {
+    try {
+      final response = await client.post(
+        Uri.https('api.coinlore.net', '/api/tickers/', {
+          'id': id.toString(),
+        }),
+      );
+      return (parseToken(response.body));
+    } finally {
+      client.close();
+    }
+  }
 }
 
 List<Token> parseTokens(String responseBody) {
   final parsed = jsonDecode(responseBody) as Map<String, dynamic>;
   final data = parsed["data"] as List<dynamic>;
   return data.cast<Map<String, dynamic>>().map(Token.fromJson).toList();
+}
+
+Token parseToken(String responseBody) {
+  final parsed = jsonDecode(responseBody) as Map<String, dynamic>;
+  return Token.fromJson(parsed);
+}
+
+FlTitlesData get tData => FlTitlesData(
+      bottomTitles: AxisTitles(
+        sideTitles: bottomTitles,
+      ),
+      rightTitles: const AxisTitles(
+        sideTitles: SideTitles(showTitles: false),
+      ),
+      topTitles: const AxisTitles(
+        sideTitles: SideTitles(showTitles: false),
+      ),
+    );
+
+SideTitles get bottomTitles => SideTitles(
+      showTitles: true,
+      reservedSize: 32,
+      interval: 1,
+      getTitlesWidget: bottomTitleWidgets,
+    );
+
+Widget bottomTitleWidgets(double value, TitleMeta meta) {
+  DateTime day = DateTime.now().add(Duration(hours: -24 * (8 - value.toInt())));
+  const style = TextStyle(
+    fontWeight: FontWeight.bold,
+    fontSize: 16,
+  );
+  Widget text = Text('${day.day}.${day.month}', style: style);
+  return SideTitleWidget(
+    meta: meta,
+    space: 10,
+    child: text,
+  );
 }
