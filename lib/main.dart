@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/gestures.dart';
 import 'dart:math';
+import 'package:intl/intl.dart';
 
 void main() {
   runApp(const MyApp());
@@ -15,6 +16,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      theme: ThemeData(brightness: Brightness.dark),
       debugShowCheckedModeBanner: false,
       scrollBehavior: const MaterialScrollBehavior()
           .copyWith(dragDevices: PointerDeviceKind.values.toSet()),
@@ -30,9 +32,12 @@ class HomeScreen extends StatefulWidget {
   HomeScreenState createState() => HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   List<Token> _tokenList = [];
+  bool _loadingstate = false;
+  bool _errorstate = false;
   int _start = 0;
+  late AnimationController _controller;
 
   update(int i, List<Token> value) {
     if (mounted) {
@@ -46,17 +51,79 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   initState() {
     super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..addListener(() {
+        setState(() {});
+      });
+    _controller.repeat();
     getRating(0);
   }
 
-  void getRating(int i) async {
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> getRating(int i) async {
     if (_start + widget._limit * i >= 0) {
-      WebClient()
-          .getRating(_start + i * widget._limit, widget._limit)
-          .then((value) {
-        update(i, value);
-      });
+      _errorstate = false;
+      _loadingstate = true;
+      try {
+        final rating = await WebClient()
+            .getRating(_start + i * widget._limit, widget._limit);
+        update(i, rating);
+      } catch (e) {
+        _errorstate = true;
+      } finally {
+        _loadingstate = false;
+      }
     }
+  }
+
+  loading() {
+    if (_errorstate) {
+      return Center(
+        child: Text("Couldn't upload data", style: TextStyle(fontSize: 22)),
+      );
+    }
+    if (_loadingstate) {
+      return Row(children: [
+        Text(
+          'Data is being uploaded',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        CircularProgressIndicator(
+          value: _controller.value,
+        ),
+      ]);
+    } else {
+      return Text("");
+    }
+  }
+
+  prevButton() {
+    if (_loadingstate == false && _errorstate == false) {
+      return ElevatedButton(
+          child: Text("←", style: TextStyle(fontSize: 18)),
+          onPressed: () {
+            getRating(-1);
+          });
+    }
+    return Text("");
+  }
+
+  nextButton() {
+    if (_loadingstate == false && _errorstate == false) {
+      return ElevatedButton(
+          child: Text("→", style: TextStyle(fontSize: 18)),
+          onPressed: () {
+            getRating(1);
+          });
+    }
+    return Text("");
   }
 
   @override
@@ -68,51 +135,52 @@ class HomeScreenState extends State<HomeScreen> {
             width: 350,
             child: Row(children: [
               Expanded(
-                flex: 3,
+                flex: 2,
                 child: Text("Token rating", style: TextStyle(fontSize: 22)),
               ),
               Expanded(
                 flex: 1,
-                child: ElevatedButton(
-                    child: Text("←", style: TextStyle(fontSize: 18)),
-                    onPressed: () {
-                      getRating(-1);
-                    }),
+                child: prevButton(),
               ),
               Expanded(
                 flex: 1,
-                child: ElevatedButton(
-                    child: Text("→", style: TextStyle(fontSize: 18)),
-                    onPressed: () {
-                      getRating(1);
-                    }),
+                child: nextButton(),
               ),
             ]),
           ),
         ),
-        body: RefreshIndicator(
-          onRefresh: () async {
-            getRating(0);
-          },
-          child: ListView.builder(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(8),
-            itemCount: _tokenList.length,
-            itemBuilder: (BuildContext context, int index) {
-              return ListTile(
-                title: Text(
-                    "${_tokenList[index].rank}. ${_tokenList[index].symbol} | ${_tokenList[index].name}"),
-                onTap: () {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) =>
-                            TokenScreen(_tokenList[index], null),
-                      ));
+        body: Column(
+          children: [
+            SizedBox(
+              height: 28,
+              child: loading(),
+            ),
+            Expanded(
+                child: RefreshIndicator(
+              onRefresh: () async {
+                return await getRating(0);
+              },
+              child: ListView.builder(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(8),
+                itemCount: _tokenList.length,
+                itemBuilder: (BuildContext context, int index) {
+                  return ListTile(
+                    title: Text(
+                        "${_tokenList[index].rank}. ${_tokenList[index].symbol} | ${_tokenList[index].name}"),
+                    onTap: () {
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                TokenScreen(_tokenList[index], null),
+                          ));
+                    },
+                  );
                 },
-              );
-            },
-          ),
+              ),
+            ))
+          ],
         ));
   }
 }
@@ -178,10 +246,14 @@ class TokenScreenState extends State<TokenScreen> {
     _minY = _price * (1 - max(_p24h.abs(), _p7d.abs()) - 0.05);
   }
 
-  void getMarkets(int id) async {
-    WebClient().getMarkets(id).then((value) {
-      update(value);
-    });
+  Future<void> getMarkets(int id) async {
+    try {
+      WebClient().getMarkets(id).then((value) {
+        update(value);
+      });
+    } catch (e) {
+      print(e);
+    }
   }
 
   @override
@@ -287,9 +359,12 @@ class MarketsScreen extends StatefulWidget {
 }
 
 class MarketsScreenState extends State<MarketsScreen> {
-  List<Market> _markets = [];
-  final List<String> _sortTypeList = <String>[
-    'Default',
+  List<Market> _allMarkets = [];
+  List<Market> _visibleMarkets = [];
+  String _quote = "";
+  String _name = "";
+  static const List<String> _sortTypeList = [
+    'No sort',
     'Name ↓',
     'Name ↑',
     'Price ↓',
@@ -297,11 +372,48 @@ class MarketsScreenState extends State<MarketsScreen> {
   ];
   String _sortType = "";
 
+  void sort(String sortType) {
+    setState(() {
+      switch (_sortType = sortType) {
+        case 'Name ↓':
+          _visibleMarkets.sort((m1, m2) =>
+              m1.name.toLowerCase().compareTo(m2.name.toLowerCase()));
+        case 'Name ↑':
+          _visibleMarkets.sort((m1, m2) =>
+              m2.name.toLowerCase().compareTo(m1.name.toLowerCase()));
+        case 'Price ↓':
+          _visibleMarkets
+              .sort((m1, m2) => (m1.price_usd - m2.price_usd).toInt());
+        case 'Price ↑':
+          _visibleMarkets
+              .sort((m1, m2) => (m2.price_usd - m1.price_usd).toInt());
+        default:
+          _visibleMarkets = _allMarkets;
+      }
+    });
+  }
+
+  void filter({String? name, String? quote}) {
+    name ??= _name;
+    quote ??= _quote;
+    sort(_sortType);
+    setState(() {
+      _name = name!;
+      _quote = quote!;
+      _visibleMarkets = _visibleMarkets
+          .where((m) =>
+              m.quote.toLowerCase().contains(quote!.toLowerCase()) &&
+              m.name.toLowerCase().contains(name!.toLowerCase()))
+          .toList();
+    });
+  }
+
   @override
   initState() {
     super.initState();
     _sortType = _sortTypeList.first;
-    _markets = widget._initMarkets;
+    _allMarkets = widget._initMarkets;
+    _visibleMarkets = widget._initMarkets;
   }
 
   @override
@@ -315,35 +427,64 @@ class MarketsScreenState extends State<MarketsScreen> {
           width: 350,
           child: Column(
             children: [
-              Align(
-                alignment: Alignment.topRight,
-                child: DropdownButton<String>(
-                  iconSize: 0,
-                  value: _sortType,
-                  icon: const Icon(Icons.arrow_downward),
-                  elevation: 16,
-                  style: const TextStyle(color: Colors.deepPurple),
-                  underline: Container(
-                    height: 2,
-                    color: Colors.deepPurpleAccent,
+              Row(
+                children: [
+                  Expanded(
+                      child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: TextField(
+                      onChanged: (text) {
+                        filter(name: text);
+                      },
+                      decoration: InputDecoration(
+                        hintText: "Name",
+                      ),
+                    ),
+                  )),
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: TextField(
+                        onChanged: (text) {
+                          filter(quote: text);
+                        },
+                        decoration: InputDecoration(
+                          hintText: "Quote",
+                        ),
+                      ),
+                    ),
                   ),
-                  onChanged: (String? value) {
-                    setState(() {
-                      _sortType = value!;
-                    });
-                  },
-                  items: _sortTypeList
-                      .map<DropdownMenuItem<String>>((String value) {
-                    return DropdownMenuItem<String>(
-                      value: value,
-                      child: Text(value),
-                    );
-                  }).toList(),
-                ),
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: DropdownButton<String>(
+                        iconSize: 0,
+                        value: _sortType,
+                        icon: const Icon(Icons.arrow_downward),
+                        elevation: 16,
+                        style: const TextStyle(color: Colors.deepPurple),
+                        underline: Container(
+                          height: 2,
+                          color: Colors.deepPurpleAccent,
+                        ),
+                        onChanged: (String? value) {
+                          sort(value!);
+                        },
+                        items: _sortTypeList
+                            .map<DropdownMenuItem<String>>((String value) {
+                          return DropdownMenuItem<String>(
+                            value: value,
+                            child: Text(value),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               Expanded(
                 child: ListView.builder(
-                  itemCount: _markets.length,
+                  itemCount: _visibleMarkets.length,
                   itemBuilder: (BuildContext context, int index) {
                     return ListTile(
                         title: Column(
@@ -351,17 +492,23 @@ class MarketsScreenState extends State<MarketsScreen> {
                         Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            "${_markets[index].name}:",
+                            "${_visibleMarkets[index].name}:",
+                            maxLines: 1,
                           ),
                         ),
                         Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                              "${_markets[index].quote} ${_markets[index].price}"),
+                            "${_visibleMarkets[index].quote} ${_visibleMarkets[index].price}",
+                            maxLines: 1,
+                          ),
                         ),
                         Align(
                           alignment: Alignment.centerLeft,
-                          child: Text("\$${_markets[index].price_usd}"),
+                          child: Text(
+                            "\$${_visibleMarkets[index].price_usd}",
+                            maxLines: 1,
+                          ),
                         ),
                       ],
                     ));
@@ -559,15 +706,14 @@ SideTitles get bottomTitles => SideTitles(
     );
 
 Widget bottomTitleWidgets(double value, TitleMeta meta) {
-  DateTime day = DateTime.now().add(Duration(hours: -24 * (9 - value.toInt())));
+  String day = DateFormat("dd.MM")
+      .format(DateTime.now().subtract(Duration(days: (9 - value).toInt())));
   const style = TextStyle(
     fontWeight: FontWeight.bold,
     fontSize: 16,
   );
   Widget text;
-  text = (value % 2 != 0)
-      ? Text('${day.day}.${day.month}', style: style)
-      : Text('');
+  text = (value % 2 != 0) ? Text(day, style: style) : Text('');
   return SideTitleWidget(
     meta: meta,
     space: 10,
