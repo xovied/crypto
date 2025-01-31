@@ -32,53 +32,40 @@ class HomeScreen extends StatefulWidget {
   HomeScreenState createState() => HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+class HomeScreenState extends State<HomeScreen> {
   List<Token> _tokenList = [];
   bool _loadingstate = false;
   bool _errorstate = false;
   int _start = 0;
-  late AnimationController _controller;
 
-  update(int i, List<Token> value) {
-    if (mounted) {
-      setState(() {
-        _start += i * widget._limit;
-        _tokenList = value;
-      });
-    }
-  }
+  update(int i, List<Token> value) {}
 
   @override
   initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..addListener(() {
-        setState(() {});
-      });
-    _controller.repeat();
     getRating(0);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
   }
 
   Future<void> getRating(int i) async {
     if (_start + widget._limit * i >= 0) {
-      _errorstate = false;
-      _loadingstate = true;
+      setState(() {
+        _errorstate = false;
+        _loadingstate = true;
+        _start += i * widget._limit;
+      });
+
       try {
-        final rating = await WebClient()
-            .getRating(_start + i * widget._limit, widget._limit);
-        update(i, rating);
+        final rating = await WebClient().getRating(_start, widget._limit);
+
+        _tokenList = rating;
       } catch (e) {
         _errorstate = true;
       } finally {
-        _loadingstate = false;
+        if (mounted) {
+          setState(() {
+            _loadingstate = false;
+          });
+        }
       }
     }
   }
@@ -95,35 +82,33 @@ class HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           'Data is being uploaded',
           style: Theme.of(context).textTheme.titleLarge,
         ),
-        CircularProgressIndicator(
-          value: _controller.value,
-        ),
+        CircularProgressIndicator(),
       ]);
     } else {
-      return Text("");
+      return Container();
     }
   }
 
-  prevButton() {
-    if (_loadingstate == false && _errorstate == false) {
-      return ElevatedButton(
-          child: Text("←", style: TextStyle(fontSize: 18)),
-          onPressed: () {
-            getRating(-1);
-          });
-    }
-    return Text("");
+  Widget prevButton() {
+    return IconButton(
+      icon: const Icon(Icons.arrow_back_sharp),
+      onPressed: !(_loadingstate && _errorstate)
+          ? () {
+              getRating(-1);
+            }
+          : null,
+    );
   }
 
-  nextButton() {
-    if (_loadingstate == false && _errorstate == false) {
-      return ElevatedButton(
-          child: Text("→", style: TextStyle(fontSize: 18)),
-          onPressed: () {
-            getRating(1);
-          });
-    }
-    return Text("");
+  Widget nextButton() {
+    return IconButton(
+      icon: const Icon(Icons.arrow_forward_sharp),
+      onPressed: !(_loadingstate && _errorstate)
+          ? () {
+              getRating(1);
+            }
+          : null,
+    );
   }
 
   @override
@@ -203,15 +188,6 @@ class TokenScreenState extends State<TokenScreen> {
   dynamic _spots;
   dynamic _maxY, _minY;
 
-  update(List<Market> value) {
-    if (mounted) {
-      setState(() {
-        _markets = value;
-        _topMarkets = value.sublist(0, 5);
-      });
-    }
-  }
-
   @override
   initState() {
     super.initState();
@@ -246,14 +222,13 @@ class TokenScreenState extends State<TokenScreen> {
     _minY = _price * (1 - max(_p24h.abs(), _p7d.abs()) - 0.05);
   }
 
-  Future<void> getMarkets(int id) async {
-    try {
-      WebClient().getMarkets(id).then((value) {
-        update(value);
+  Future<void> getMarkets(int id) {
+    return WebClient().getMarkets(id).then((value) {
+      setState(() {
+        _markets = value;
+        _topMarkets = value.sublist(0, 5);
       });
-    } catch (e) {
-      print(e);
-    }
+    });
   }
 
   @override
@@ -334,7 +309,7 @@ class TokenScreenState extends State<TokenScreen> {
                             itemCount: _topMarkets.length,
                             itemBuilder: (BuildContext context, int index) {
                               return Text(
-                                "${_topMarkets[index].name}: \$${_topMarkets[index].price_usd}",
+                                "${_topMarkets[index].name}: \$${_topMarkets[index].priceUsd}",
                                 style: TextStyle(fontSize: 16),
                                 maxLines: 1,
                                 softWrap: false,
@@ -361,7 +336,8 @@ class MarketsScreen extends StatefulWidget {
 class MarketsScreenState extends State<MarketsScreen> {
   List<Market> _allMarkets = [];
   List<Market> _visibleMarkets = [];
-  String _quote = "";
+  Set<String> quoteTypeList = {'All'};
+  String _quoteType = "";
   String _name = "";
   static const List<String> _sortTypeList = [
     'No sort',
@@ -373,38 +349,33 @@ class MarketsScreenState extends State<MarketsScreen> {
   String _sortType = "";
 
   void sort(String sortType) {
-    setState(() {
-      switch (_sortType = sortType) {
-        case 'Name ↓':
-          _visibleMarkets.sort((m1, m2) =>
-              m1.name.toLowerCase().compareTo(m2.name.toLowerCase()));
-        case 'Name ↑':
-          _visibleMarkets.sort((m1, m2) =>
-              m2.name.toLowerCase().compareTo(m1.name.toLowerCase()));
-        case 'Price ↓':
-          _visibleMarkets
-              .sort((m1, m2) => (m1.price_usd - m2.price_usd).toInt());
-        case 'Price ↑':
-          _visibleMarkets
-              .sort((m1, m2) => (m2.price_usd - m1.price_usd).toInt());
-        default:
-          _visibleMarkets = _allMarkets;
-      }
-    });
+    switch (_sortType = sortType) {
+      case 'Name ↓':
+        _visibleMarkets.sort(
+            (m1, m2) => m1.name.toLowerCase().compareTo(m2.name.toLowerCase()));
+      case 'Name ↑':
+        _visibleMarkets.sort(
+            (m1, m2) => m2.name.toLowerCase().compareTo(m1.name.toLowerCase()));
+      case 'Price ↓':
+        _visibleMarkets.sort((m1, m2) => (m1.priceUsd - m2.priceUsd).toInt());
+      case 'Price ↑':
+        _visibleMarkets.sort((m1, m2) => (m2.priceUsd - m1.priceUsd).toInt());
+    }
   }
 
   void filter({String? name, String? quote}) {
     name ??= _name;
-    quote ??= _quote;
-    sort(_sortType);
+    quote ??= _quoteType;
+
     setState(() {
       _name = name!;
-      _quote = quote!;
-      _visibleMarkets = _visibleMarkets
+      _quoteType = quote!;
+      _visibleMarkets = _allMarkets
           .where((m) =>
-              m.quote.toLowerCase().contains(quote!.toLowerCase()) &&
-              m.name.toLowerCase().contains(name!.toLowerCase()))
+              (m.quote == _quoteType || _quoteType == "All") &&
+              m.name.toLowerCase().contains(_name.toLowerCase()))
           .toList();
+      sort(_sortType);
     });
   }
 
@@ -413,6 +384,8 @@ class MarketsScreenState extends State<MarketsScreen> {
     super.initState();
     _sortType = _sortTypeList.first;
     _allMarkets = widget._initMarkets;
+    _quoteType = quoteTypeList.first;
+    quoteTypeList.addAll(_allMarkets.map((market) => market.quote).toSet());
     _visibleMarkets = widget._initMarkets;
   }
 
@@ -444,14 +417,26 @@ class MarketsScreenState extends State<MarketsScreen> {
                   Expanded(
                     child: Padding(
                       padding: EdgeInsets.all(16),
-                      child: TextField(
-                        onChanged: (text) {
-                          filter(quote: text);
-                        },
-                        decoration: InputDecoration(
-                          hintText: "Quote",
-                        ),
-                      ),
+                      child: DropdownButton<String>(
+                          iconSize: 0,
+                          value: _quoteType,
+                          icon: const Icon(Icons.arrow_downward),
+                          elevation: 16,
+                          style: const TextStyle(color: Colors.deepPurple),
+                          underline: Container(
+                            height: 2,
+                            color: Colors.deepPurpleAccent,
+                          ),
+                          onChanged: (String? quote) {
+                            filter(quote: quote);
+                          },
+                          items: quoteTypeList
+                              .map<DropdownMenuItem<String>>((String value) {
+                            return DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(value),
+                            );
+                          }).toList()),
                     ),
                   ),
                   Expanded(
@@ -467,8 +452,10 @@ class MarketsScreenState extends State<MarketsScreen> {
                           height: 2,
                           color: Colors.deepPurpleAccent,
                         ),
-                        onChanged: (String? value) {
-                          sort(value!);
+                        onChanged: (String? sortType) {
+                          setState(() {
+                            sort(sortType!);
+                          });
                         },
                         items: _sortTypeList
                             .map<DropdownMenuItem<String>>((String value) {
@@ -506,7 +493,7 @@ class MarketsScreenState extends State<MarketsScreen> {
                         Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            "\$${_visibleMarkets[index].price_usd}",
+                            "\$${_visibleMarkets[index].priceUsd}",
                             maxLines: 1,
                           ),
                         ),
@@ -526,12 +513,12 @@ class Token {
   final String symbol;
   final String name;
   final int rank;
-  final double price_usd;
-  final double percent_change_24h;
-  final double percent_change_1h;
-  final double percent_change_7d;
-  final double price_btc;
-  final double market_cap_usd;
+  final double priceUsd;
+  final double percentChange24h;
+  final double percentChange1h;
+  final double percentChange7d;
+  final double priceBtc;
+  final double marketCapUsd;
   final double volume24;
   final double volume24a;
   final dynamic csupply;
@@ -542,12 +529,12 @@ class Token {
       required this.symbol,
       required this.name,
       required this.rank,
-      required this.price_usd,
-      required this.percent_change_24h,
-      required this.percent_change_1h,
-      required this.percent_change_7d,
-      required this.price_btc,
-      required this.market_cap_usd,
+      required this.priceUsd,
+      required this.percentChange24h,
+      required this.percentChange1h,
+      required this.percentChange7d,
+      required this.priceBtc,
+      required this.marketCapUsd,
       required this.volume24,
       required this.volume24a,
       required this.csupply,
@@ -559,12 +546,12 @@ class Token {
       symbol: json['symbol'],
       name: json['name'],
       rank: json['rank'],
-      price_usd: double.parse(json['price_usd']),
-      percent_change_24h: double.parse(json['percent_change_24h']),
-      percent_change_1h: double.parse(json['percent_change_1h']),
-      percent_change_7d: double.parse(json['percent_change_7d']),
-      price_btc: double.parse(json['price_btc']),
-      market_cap_usd: double.tryParse(json['market_cap_usd']) ?? 0,
+      priceUsd: double.parse(json['price_usd']),
+      percentChange24h: double.parse(json['percent_change_24h']),
+      percentChange1h: double.parse(json['percent_change_1h']),
+      percentChange7d: double.parse(json['percent_change_7d']),
+      priceBtc: double.parse(json['price_btc']),
+      marketCapUsd: double.tryParse(json['market_cap_usd']) ?? 0,
       volume24: (json['volume24'] ?? 0).toDouble(),
       volume24a: (json['volume24a'] ?? 0).toDouble(),
       csupply: json['csupply'],
@@ -578,12 +565,12 @@ class Token {
       'Symbol': symbol,
       'Name': name,
       'Rank': rank,
-      'Price (USD)': price_usd,
-      'Percent change (24h)': percent_change_24h,
-      'Percent change (1h)': percent_change_1h,
-      'Percent change (7d)': percent_change_7d,
-      'Price (BTC)': price_btc,
-      'Marketcap (USD)': market_cap_usd,
+      'Price (USD)': priceUsd,
+      'Percent change (24h)': percentChange24h,
+      'Percent change (1h)': percentChange1h,
+      'Percent change (7d)': percentChange7d,
+      'Price (BTC)': priceBtc,
+      'Marketcap (USD)': marketCapUsd,
       'Volume (24h in USD)': volume24,
       'Volume (24h in coins)': volume24a,
       'Circulating Supply': csupply,
@@ -598,18 +585,18 @@ class Market {
   final String base;
   final String quote;
   final double price;
-  final double price_usd;
+  final double priceUsd;
   final double volume;
-  final double volume_usd;
+  final double volumeUsd;
   final double time;
   Market(
       {required this.name,
       required this.base,
       required this.quote,
       required this.price,
-      required this.price_usd,
+      required this.priceUsd,
       required this.volume,
-      required this.volume_usd,
+      required this.volumeUsd,
       required this.time});
   factory Market.fromJson(Map<String, dynamic> json) {
     return Market(
@@ -617,9 +604,9 @@ class Market {
       base: json['base'] ?? "",
       quote: json['quote'] ?? "",
       price: json['price']?.toDouble() ?? 0,
-      price_usd: json['price_usd']?.toDouble() ?? 0,
+      priceUsd: json['price_usd']?.toDouble() ?? 0,
       volume: json['volume']?.toDouble() ?? 0,
-      volume_usd: json['volume_usd']?.toDouble() ?? 0,
+      volumeUsd: json['volume_usd']?.toDouble() ?? 0,
       time: json['time']?.toDouble() ?? 0,
     );
   }
@@ -664,6 +651,8 @@ class WebClient {
         }),
       );
       return (parseMarkets(response.body));
+    } catch (e) {
+      return [];
     } finally {
       client.close();
     }
